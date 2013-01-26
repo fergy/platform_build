@@ -44,7 +44,7 @@ include $(TARGET_ARCH_SPECIFIC_MAKEFILE)
 # You can set TARGET_TOOLS_PREFIX to get gcc from somewhere else
 ifeq ($(strip $(TARGET_TOOLS_PREFIX)),)
 TARGET_TOOLS_PREFIX := \
-	prebuilt/$(HOST_PREBUILT_TAG)/toolchain/arm-eabi-4.4.3/bin/arm-eabi-
+	prebuilts/gcc/$(HOST_PREBUILT_TAG)/arm/arm-eabi-4.6/bin/arm-eabi-
 endif
 
 TARGET_CC := $(TARGET_TOOLS_PREFIX)gcc$(HOST_EXECUTABLE_SUFFIX)
