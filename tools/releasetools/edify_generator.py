@@ -87,8 +87,10 @@ class EdifyGenerator(object):
 
   def AssertDevice(self, device):
     """Assert that the device identifier is the given string."""
-    cmd = ('assert(getprop("ro.product.device") == "%s" ||\0'
-           'getprop("ro.build.product") == "%s");' % (device, device))
+    cmd = ('assert(' +
+           ' || \0'.join(['getprop("ro.product.device") == "%s" || getprop("ro.build.product") == "%s"'
+                         % (i, i) for i in device.split(",")]) +
+           ');')
     self.script.append(self._WordWrap(cmd))
 
   def AssertSomeBootloader(self, *bootloaders):
@@ -98,6 +100,16 @@ class EdifyGenerator(object):
                          for b in bootloaders]) +
            ");")
     self.script.append(self._WordWrap(cmd))
+
+  def RunBackup(self, command):
+    self.script.append('package_extract_file("system/bin/backuptool.sh", "/tmp/backuptool.sh");')
+    self.script.append('package_extract_file("system/bin/backuptool.functions", "/tmp/backuptool.functions");')
+    self.script.append('set_perm(0, 0, 0777, "/tmp/backuptool.sh");')
+    self.script.append('set_perm(0, 0, 0644, "/tmp/backuptool.functions");')
+    self.script.append(('run_program("/tmp/backuptool.sh", "%s");' % command))
+    if command == "restore":
+        self.script.append('delete("/system/bin/backuptool.sh");')
+        self.script.append('delete("/system/bin/backuptool.functions");')
 
   def ShowProgress(self, frac, dur):
     """Update the progress bar, advancing it over 'frac' over the next
@@ -141,6 +153,12 @@ class EdifyGenerator(object):
                           p.device, p.mount_point))
       self.mounts.add(p.mount_point)
 
+  def Unmount(self, mount_point):
+    """Unmount the partiiton with the given mount_point."""
+    if mount_point in self.mounts:
+      self.mounts.remove(mount_point)
+      self.script.append('unmount("%s");' % (mount_point,))
+
   def UnpackPackageDir(self, src, dst):
     """Unpack a given directory from the OTA package into the given
     destination directory."""
@@ -161,11 +179,13 @@ class EdifyGenerator(object):
     """Format the given partition, specified by its mount point (eg,
     "/system")."""
 
+    reserve_size = 0
     fstab = self.info.get("fstab", None)
     if fstab:
       p = fstab[partition]
-      self.script.append('format("%s", "%s", "%s");' %
-                         (p.fs_type, common.PARTITION_TYPES[p.fs_type], p.device))
+      self.script.append('format("%s", "%s", "%s", "%s", "%s");' %
+                         (p.fs_type, common.PARTITION_TYPES[p.fs_type],
+                          p.device, p.length, p.mount_point))
 
   def DeleteFiles(self, file_list):
     """Delete all files in file_list."""
@@ -187,18 +207,6 @@ class EdifyGenerator(object):
     cmd = "".join(cmd)
     self.script.append(self._WordWrap(cmd))
 
-  def WriteFirmwareImage(self, kind, fn):
-    """Arrange to update the given firmware image (kind must be
-    "hboot" or "radio") when recovery finishes."""
-    if self.version == 1:
-      self.script.append(
-          ('assert(package_extract_file("%(fn)s", "/tmp/%(kind)s.img"),\n'
-           '       write_firmware_image("/tmp/%(kind)s.img", "%(kind)s"));')
-          % {'kind': kind, 'fn': fn})
-    else:
-      self.script.append(
-          'write_firmware_image("PACKAGE:%s", "%s");' % (fn, kind))
-
   def WriteRawImage(self, mount_point, fn):
     """Write the given package file into the partition for the given
     mount point."""
@@ -210,12 +218,17 @@ class EdifyGenerator(object):
       args = {'device': p.device, 'fn': fn}
       if partition_type == "MTD":
         self.script.append(
-            ('assert(package_extract_file("%(fn)s", "/tmp/%(device)s.img"),\n'
-             '       write_raw_image("/tmp/%(device)s.img", "%(device)s"),\n'
-             '       delete("/tmp/%(device)s.img"));') % args)
+            'package_extract_file("%(fn)s", "/tmp/boot.img");'
+            'write_raw_image("/tmp/boot.img", "%(device)s");' % args
+            % args)
       elif partition_type == "EMMC":
         self.script.append(
             'package_extract_file("%(fn)s", "%(device)s");' % args)
+      elif partition_type == "BML":
+	        self.script.append(
+            ('assert(package_extract_file("%(fn)s", "/tmp/%(device)s.img"),\n'
+             '       write_raw_image("/tmp/%(device)s.img", "%(device)s"),\n'
+             '       delete("/tmp/%(device)s.img"));') % args)
       else:
         raise ValueError("don't know how to write \"%s\" partitions" % (p.fs_type,))
 
